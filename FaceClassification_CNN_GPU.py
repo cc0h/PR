@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
 from PIL import Image
 import numpy as np
@@ -14,23 +14,23 @@ from tqdm import tqdm
 # 检查是否有可用的GPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
-#%%
 # 自定义数据集类
 class FaceDataset(Dataset):
-    def __init__(self, data_file, raw_data_dir, transform=None):
-        self.data_file = data_file
+    def __init__(self, data_files, raw_data_dir, transform=None):
+        self.data_files = data_files
         self.raw_data_dir = raw_data_dir
         self.transform = transform
         self.samples = self._load_samples()
 
     def _load_samples(self):
         samples = []
-        with open(self.data_file, 'r') as f:
-            for line_number, line in enumerate(f, start=1):
-                parts = line.strip().split()
-                if len(parts) < 5:
-                    print(f"Skipping incomplete line {line_number}: {line}")
-                    continue  # 跳过不完整或错误的数据行
+        for data_file in self.data_files:
+            with open(data_file, 'r') as f:
+                for line_number, line in enumerate(f, start=1):
+                    parts = line.strip().split()
+                    if len(parts) < 5:
+                        print(f"Skipping incomplete line {line_number}: {line}")
+                        continue  # 跳过不完整或错误的数据行
 
                 try:
                     image_id = parts[0]
@@ -76,12 +76,11 @@ class FaceDataset(Dataset):
 
         return img, torch.tensor(labels, dtype=torch.long)
 
-#%%
 # 数据变换，包括数据增强
 train_transform = transforms.Compose([
     transforms.Resize((128, 128)),
     transforms.RandomHorizontalFlip(),
-    transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+    transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
     transforms.ToTensor(),
 ])
 
@@ -91,11 +90,16 @@ test_transform = transforms.Compose([
 ])
 
 # 加载数据集
-train_dataset = FaceDataset(data_file='../人脸图像识别/face/faceDR', raw_data_dir='../人脸图像识别/face/rawdata', transform=train_transform)
-test_dataset = FaceDataset(data_file='../人脸图像识别/face/faceDS', raw_data_dir='../人脸图像识别/face/rawdata', transform=test_transform)
+dataset = FaceDataset(data_files=['face/faceDR', 'face/faceDS'], raw_data_dir='face/rawdata', transform=train_transform)
+
+# 打乱数据集并划分训练集和测试集
+total_size = len(dataset)
+train_size = int(0.7 * total_size)
+test_size = total_size - train_size
+train_dataset, test_dataset = random_split(dataset, [train_size, test_size], generator=torch.Generator().manual_seed(1523))
+
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-#%%
 # 定义卷积神经网络模型
 class SimpleCNN(nn.Module):
     def __init__(self):
@@ -120,7 +124,6 @@ class SimpleCNN(nn.Module):
         race_output = self.fc4(x)
         face_output = self.fc5(x)
         return sex_output, age_output, race_output, face_output
-#%%
 # 初始化模型、损失函数和优化器
 model = SimpleCNN().to(device)
 criterion = nn.CrossEntropyLoss().to(device)
