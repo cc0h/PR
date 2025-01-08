@@ -32,15 +32,15 @@ class FaceDataset(Dataset):
                         print(f"Skipping incomplete line {line_number}: {line}")
                         continue  # 跳过不完整或错误的数据行
 
-                try:
-                    image_id = parts[0]
-                    sex = parts[2].strip('()')
-                    age = parts[4].strip('()')
-                    race = parts[6].strip('()')
-                    face = parts[8].strip('()')
-                    samples.append((image_id, sex, age, race, face))
-                except IndexError as e:
-                    print(f"Skipping malformed line {line_number} due to error: {e}\nLine content: {line}")
+                    try:
+                        image_id = parts[0]
+                        sex = parts[2].strip('()')
+                        age = parts[4].strip('()')
+                        race = parts[6].strip('()')
+                        face = parts[8].strip('()')
+                        samples.append((image_id, sex, age, race, face))
+                    except IndexError as e:
+                        print(f"Skipping malformed line {line_number} due to error: {e}\nLine content: {line}")
 
         return samples
 
@@ -80,7 +80,7 @@ class FaceDataset(Dataset):
 train_transform = transforms.Compose([
     transforms.Resize((128, 128)),
     transforms.RandomHorizontalFlip(),
-    transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
+    transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0),
     transforms.ToTensor(),
 ])
 
