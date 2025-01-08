@@ -16,10 +16,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 # 自定义数据集类
 class FaceDataset(Dataset):
-    def __init__(self, data_files, raw_data_dir, transform=None):
+    def __init__(self, data_files, raw_data_dir, transform=None, brightness_threshold=0.005, center_brightness_threshold=0.96):
         self.data_files = data_files
         self.raw_data_dir = raw_data_dir
         self.transform = transform
+        self.brightness_threshold = brightness_threshold
+        self.center_brightness_threshold = center_brightness_threshold
         self.samples = self._load_samples()
 
     def _load_samples(self):
@@ -38,9 +40,37 @@ class FaceDataset(Dataset):
                         age = parts[4].strip('()')
                         race = parts[6].strip('()')
                         face = parts[8].strip('()')
+
+                        # 检查图片是否接近全黑或全白
+                        image_path = os.path.join(self.raw_data_dir, image_id)
+                        file_size_kb = os.path.getsize(image_path) / 1024
+
+                        if file_size_kb < 20:
+                            with open(image_path, 'rb') as f:
+                                img = Image.fromarray(np.reshape(np.frombuffer(f.read(), dtype=np.uint8), (128, 128)))
+                        else:
+                            with open(image_path, 'rb') as f:
+                                img = Image.fromarray(np.reshape(np.frombuffer(f.read(), dtype=np.uint8), (512, 512)))
+                                img = img.resize((128, 128))
+
+                        img_array = np.array(img).astype(float)
+                        avg_brightness = np.mean(img_array)
+                        if avg_brightness < 255 * self.brightness_threshold or avg_brightness > 255 * (1 - self.brightness_threshold):
+                            print(f"Skipping image {image_id} due to low or high overall brightness.")
+                            continue  # 跳过过于暗或亮的图片
+
+                        # 检查图片中心区域是否过亮
+                        center_region = img_array[48:80, 48:80]  # 中心32x32区域
+                        center_avg_brightness = np.mean(center_region)
+                        if center_avg_brightness > 255 * self.center_brightness_threshold:
+                            print(f"Skipping image {image_id} due to high brightness in the center region.")
+                            continue  # 跳过中心区域过亮的图片
+
                         samples.append((image_id, sex, age, race, face))
                     except IndexError as e:
                         print(f"Skipping malformed line {line_number} due to error: {e}\nLine content: {line}")
+                    except Exception as e:
+                        print(f"Failed to process image {image_id}: {e}")
 
         return samples
 
@@ -96,7 +126,8 @@ dataset = FaceDataset(data_files=['face/faceDR', 'face/faceDS'], raw_data_dir='f
 total_size = len(dataset)
 train_size = int(0.7 * total_size)
 test_size = total_size - train_size
-train_dataset, test_dataset = random_split(dataset, [train_size, test_size], generator=torch.Generator().manual_seed(1523))
+train_dataset, test_dataset = random_split(dataset, [train_size, test_size],
+                                           generator=torch.Generator().manual_seed(1523))
 
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
@@ -127,10 +158,9 @@ class SimpleCNN(nn.Module):
 # 初始化模型、损失函数和优化器
 model = SimpleCNN().to(device)
 criterion = nn.CrossEntropyLoss().to(device)
-# optimizer = optim.Adam(model.parameters(), lr=0.005)
-optimizer = optim.SGD(model.parameters(), lr=0.005, momentum=0.9)
+optimizer = optim.SGD(model.parameters(), lr=0.005, momentum=0.8)
 # 训练模型
-num_epochs = 50
+num_epochs = 60
 for epoch in tqdm(range(num_epochs)):
     model.train()
     running_loss = 0.0
@@ -216,6 +246,3 @@ plot_confusion_matrix(true_labels['sex'], pred_labels['sex'], 2, ['male', 'femal
 plot_confusion_matrix(true_labels['age'], pred_labels['age'], 4, ['child', 'teen', 'adult', 'senior'], 'Age Confusion Matrix')
 plot_confusion_matrix(true_labels['race'], pred_labels['race'], 3, ['white', 'yellow', 'black'], 'Race Confusion Matrix')
 plot_confusion_matrix(true_labels['face'], pred_labels['face'], 3, ['smiling', 'serious', 'funny'], 'Face Confusion Matrix')
-
-
-
